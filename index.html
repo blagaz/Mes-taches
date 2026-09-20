@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="fr" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mes Tâches</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="manifest" href="data:application/manifest+json,{
+    'name': 'Tâches',
+    'short_name': 'Tâches',
+    'start_url': '.',
+    'display': 'standalone',
+    'background_color': '#0f172a',
+    'theme_color': '#0f172a'
+  }">
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen p-4 font-sans">
+
+  <!-- En-tête KPI (Compteurs côte à côte) -->
+  <div class="grid grid-cols-2 gap-3 mb-6">
+    <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 text-center">
+      <p class="text-xs text-slate-400 font-semibold uppercase">À faire (Semaine)</p>
+      <p id="kpi-todo" class="text-3xl font-bold text-amber-400 mt-1">-</p>
+    </div>
+    <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 text-center">
+      <p class="text-xs text-slate-400 font-semibold uppercase">Réalisées (Semaine)</p>
+      <p id="kpi-done" class="text-3xl font-bold text-emerald-400 mt-1">-</p>
+    </div>
+  </div>
+
+  <!-- Liste des tâches -->
+  <div class="flex justify-between items-center mb-3">
+    <h2 class="text-lg font-bold">Tâches à faire</h2>
+    <div class="flex gap-2">
+      <button onclick="resetApiKey()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 px-2 py-1.5 rounded-lg border border-slate-700">🔑 Clé</button>
+      <button onclick="loadTasks()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg border border-slate-700">🔄 Actualiser</button>
+    </div>
+  </div>
+  
+  <div id="tasks-list" class="space-y-3">
+    <p class="text-slate-500 text-sm">Chargement en cours...</p>
+  </div>
+
+  <script>
+    // ⚠️ METS A JOUR TON URL GOOGLE APPS SCRIPT ICI (L'URL seule ne présente pas de danger sans la clé)
+    const API_URL = "https://script.google.com/macros/s/AKfycbzsMw3ZOXOt1-4Q2eBYSRLz3Y1oUbpuPpPPN1yfmYnEhPduSta0NR0mIccMY_XiL6fpbA/exec"; 
+
+    // Gestion de la clé API sécurisée via le navigateur local
+    function getApiKey() {
+      let key = localStorage.getItem("MY_TASKS_API_KEY");
+      if (!key) {
+        key = prompt("Veuillez entrer votre clé API de sécurité :");
+        if (key) {
+          localStorage.setItem("MY_TASKS_API_KEY", key.trim());
+        }
+      }
+      return key;
+    }
+
+    function resetApiKey() {
+      localStorage.removeItem("MY_TASKS_API_KEY");
+      alert("Clé API réinitialisée.");
+      loadTasks();
+    }
+
+    async function loadTasks() {
+      const apiKey = getApiKey();
+      if (!apiKey) {
+        document.getElementById("tasks-list").innerHTML = `<p class="text-amber-400 text-sm">Clé API manquante. Appuyez sur "🔑 Clé" pour la renseigner.</p>`;
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_URL}?key=${encodeURIComponent(apiKey)}`, {
+          method: "GET",
+          redirect: "follow"
+        });
+
+        const text = await res.text();
+        const data = JSON.parse(text);
+
+        if (data.error) {
+          alert("Erreur de sécurité : " + data.error);
+          return;
+        }
+        
+        let todo = 0, done = 0;
+        const container = document.getElementById("tasks-list");
+        container.innerHTML = "";
+
+        if (!Array.isArray(data) || data.length === 0) {
+          container.innerHTML = `<p class="text-slate-500 text-sm">Aucune tâche trouvée.</p>`;
+          document.getElementById("kpi-todo").innerText = "0";
+          document.getElementById("kpi-done").innerText = "0";
+          return;
+        }
+
+        data.forEach(t => {
+          if (t.Statut === "A faire") todo++;
+          if (t.Statut === "Terminé") done++;
+
+          if (t.Statut === "A faire") {
+            const titre = t.Titre || 'Tâche sans nom';
+            const dateEcheance = t.Date_Echeance ? String(t.Date_Echeance).substring(0, 10) : 'N/A';
+            const row = t._row;
+            const id = t.ID || '';
+            const recurrence = t.Recurrence || '';
+
+            container.innerHTML += `
+              <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 flex justify-between items-center">
+                <div>
+                  <p class="font-medium text-slate-100">${titre}</p>
+                  <p class="text-xs text-slate-400 mt-0.5">Échéance : ${dateEcheance}</p>
+                </div>
+                <button onclick="completeTask(${row}, '${titre.replace(/'/g, "\\'")}', '${id}', '${recurrence}')" 
+                        class="bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-xs px-3 py-2 rounded-lg font-medium transition">
+                  Valider
+                </button>
+              </div>`;
+          }
+        });
+
+        document.getElementById("kpi-todo").innerText = todo;
+        document.getElementById("kpi-done").innerText = done;
+      } catch (e) {
+        alert("Erreur détaillée : " + e.message);
+      }
+    }
+
+    async function completeTask(row, titre, id, recurrence) {
+      const apiKey = getApiKey();
+      if (!apiKey) return;
+
+      let nextDate = new Date();
+      nextDate.setDate(nextDate.getDate() + 7); // Incrément par défaut de 7 jours
+
+      try {
+        await fetch(API_URL, {
+          method: "POST",
+          redirect: "follow",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({
+            key: apiKey,
+            action: "complete",
+            row: row,
+            titre: titre,
+            idOriginal: id,
+            recurrence: recurrence,
+            nextDate: nextDate.toISOString()
+          })
+        });
+        loadTasks();
+      } catch (e) {
+        alert("Erreur lors de la validation : " + e.message);
+      }
+    }
+
+    // Chargement automatique au démarrage
+    loadTasks();
+  </script>
+</body>
+</html>
